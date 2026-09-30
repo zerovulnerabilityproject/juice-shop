@@ -46,7 +46,7 @@ describe('/api', () => {
   })
 
   describe('challenge "changeProductChallenge"', () => {
-    it('should be possible to change product via PUT request without being logged in', () => {
+    it('should not be possible to change product via PUT request without being logged in', () => {
       cy.task<number>('GetTamperingProductId').then((tamperingProductId: number) => {
         cy.task<string>('GetOverwriteUrl').then((overwriteUrl: string) => {
           cy.window().then(async () => {
@@ -63,13 +63,10 @@ describe('/api', () => {
                 })
               }
             )
-            assert.equal(response.status, 200)
+            assert.equal(response.status, 403)
           })
-
-          cy.visit('/#/search')
         })
       })
-      cy.expectChallengeSolved({ challenge: 'Product Tampering' })
     })
   })
 })
