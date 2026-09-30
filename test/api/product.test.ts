@@ -19,6 +19,8 @@ const tamperingProductId = config.get<ProductConfig[]>('products').findIndex((pr
 let app: Express
 const authHeader = { Authorization: 'Bearer ' + security.authorize(), 'content-type': 'application/json' }
 const jsonHeader = { 'content-type': 'application/json' }
+const customerAuthHeader = { Authorization: 'Bearer ' + security.authorize({ data: { role: security.roles.customer } }), 'content-type': 'application/json' }
+const accountingAuthHeader = { Authorization: 'Bearer ' + security.authorize({ data: { role: security.roles.accounting } }), 'content-type': 'application/json' }
 
 before(async () => {
   const result = await createTestApp()
@@ -96,16 +98,33 @@ void describe('/api/Products/:id', () => {
     assert.equal(res.body.message, 'Not Found')
   })
 
-  void it('PUT update existing product is possible due to Missing Function-Level Access Control vulnerability', async () => {
+  void it('PUT update existing product is forbidden via public API', async () => {
     const res = await request(app)
       .put('/api/Products/' + tamperingProductId)
       .set(jsonHeader)
       .send({
         description: '<a href="http://kimminich.de" target="_blank">More...</a>'
       })
+    assert.equal(res.status, 403)
+  })
+
+  void it('PUT update existing product is forbidden for customers', async () => {
+    const res = await request(app)
+      .put('/api/Products/' + tamperingProductId)
+      .set(customerAuthHeader)
+      .send({
+        description: '<a href="http://kimminich.de" target="_blank">More...</a>'
+      })
+    assert.equal(res.status, 403)
+  })
+
+  void it('PUT update existing product price is possible for accounting', async () => {
+    const res = await request(app)
+      .put('/api/Products/1')
+      .set(accountingAuthHeader)
+      .send({ price: 1.99 })
     assert.equal(res.status, 200)
-    assert.ok(res.headers['content-type']?.includes('application/json'))
-    assert.equal(res.body.data.description, '<a href="http://kimminich.de" target="_blank">More...</a>')
+    assert.equal(res.body.data.price, 1.99)
   })
 
   void it('DELETE existing product is forbidden via public API', async () => {
