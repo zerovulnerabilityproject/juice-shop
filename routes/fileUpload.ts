@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import vm from 'node:vm'
 import path from 'node:path'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import yaml from 'js-yaml'
 import unzipper from 'unzipper'
@@ -24,15 +25,41 @@ function ensureFileIsPassed ({ file }: Request, res: Response, next: NextFunctio
   }
 }
 
+const ZIP_MAX_ENTRIES = 50
+const ZIP_MAX_ENTRY_SIZE = 10 * 1024 * 1024
+const ZIP_MAX_TOTAL_SIZE = 50 * 1024 * 1024
+
 async function extractZipBuffer (buffer: Buffer) {
   const directory = await unzipper.Open.buffer(buffer)
+  const destDir = path.resolve('uploads/complaints')
+  if (directory.files.length > ZIP_MAX_ENTRIES) {
+    throw new Error(`Zip archive contains more than ${ZIP_MAX_ENTRIES} entries`)
+  }
+  let totalSize = 0
   for (const entry of directory.files) {
     const fileName = entry.path
-    const absolutePath = path.resolve('uploads/complaints/' + fileName)
+    const absolutePath = path.resolve(destDir, fileName)
     challengeUtils.solveIf(challenges.fileWriteChallenge, () => { return absolutePath === path.resolve('ftp/legal.md') })
-    if (absolutePath.includes(path.resolve('.'))) {
-      await pipeline(entry.stream(), fs.createWriteStream('uploads/complaints/' + fileName))
+    totalSize += entry.uncompressedSize ?? 0
+    if (totalSize > ZIP_MAX_TOTAL_SIZE) {
+      throw new Error(`Zip archive exceeds maximum total decompressed size of ${ZIP_MAX_TOTAL_SIZE} bytes`)
     }
+    if (entry.type === 'Directory' || !absolutePath.startsWith(destDir + path.sep)) {
+      continue
+    }
+    let entrySize = 0
+    const sizeLimit = new Transform({
+      transform (chunk, _encoding, callback) {
+        entrySize += chunk.length
+        if (entrySize > ZIP_MAX_ENTRY_SIZE) {
+          callback(new Error(`Zip entry exceeds maximum decompressed size of ${ZIP_MAX_ENTRY_SIZE} bytes`))
+        } else {
+          callback(null, chunk)
+        }
+      }
+    })
+    await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true })
+    await pipeline(entry.stream(), sizeLimit, fs.createWriteStream(absolutePath))
   }
 }
 
